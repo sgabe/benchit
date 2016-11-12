@@ -33,8 +33,8 @@ system requirements:
 
 __description__ = 'Simple Python script for security auditing purposes.'
 __author__ = 'Gabor Seljan'
-__version__ = '0.1.5'
-__date__ = '2016/11/01'
+__version__ = '0.1.6'
+__date__ = '2016/11/12'
 
 import io
 import os
@@ -148,7 +148,7 @@ def main():
 
     for r, d in items.items():
         print('[*]   Checking %s items...' % r)
-        if r is not None:
+        if r != 'None':
             for f, i in d.items():
                 print('[+]     Processing %s' % f)
                 path = '/'.join([args.p, f])
@@ -159,19 +159,25 @@ def main():
         else:
             for f, i in d.items():
                 try:
-                    for c, n, d in items:
+                    for c, n, t, d, *_ in i:
+                        total += 1
                         if not os.path.isfile('/'.join([args.p, f])):
                             raise IOError('{} not found!'.format(f))
-                        output = check_output(c.format(args.p), shell=True)
+                        c = c.format(args.p)
+                        print('[+]     Executing {}'.format(c))
+                        output = check_output(c, shell=True)
                         if output:
-                            results.append((n, t, d, '', '', 'Fail'))
+                            failed += 1
+                            r = 'Fail'
                         else:
-                            results.append((n, t, d, '', '', 'Pass'))
+                            passed += 1
+                            r = 'Pass'
+                        results.append((n, t, d, '', '', '', r))
                 except (IOError, OSError) as err:
                     print('[!] Error: {}'.format(err))
-                    for c, n, t, d in items:
+                    for c, n, t, d, *_ in i:
                         errors += 1
-                        results.append((n, t, d, '', '', 'Error'))
+                        results.append((n, t, d, '', '', '', 'Error'))
 
     timestamp = time.strftime("%Y%m%dT%H%M%S")
     filename = '{}_{}'.format(args.o, timestamp)
