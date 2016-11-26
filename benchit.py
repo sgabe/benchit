@@ -33,8 +33,8 @@ system requirements:
 
 __description__ = 'Simple Python script for security auditing purposes.'
 __author__ = 'Gabor Seljan'
-__version__ = '0.1.6'
-__date__ = '2016/11/12'
+__version__ = '0.1.7'
+__date__ = '2016/11/26'
 
 import io
 import os
@@ -202,7 +202,7 @@ def check_item_os(filename, items, expected):
     if args.l and args.s and ('dirlist.txt' in filename):
         return
     try:
-        with open(filename, "r") as f:
+        with open(filename, 'r', encoding='utf8') as f:
             s = f.read().replace('\\', '\\\\')
             for p, n, t, b, d, e in items:
                 total += 1
