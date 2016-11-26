@@ -83,7 +83,7 @@ parser.add_argument('-p, --path', dest='p', default='.',
                     help='base path to target directory (default .)')
 parser.add_argument('-v, --verbose', dest='v', action='store_true',
                     help='run in verbose mode')
-parser.add_argument('--skipdirlist', action='store_true',
+parser.add_argument('-s, --skip-dirlist', dest='s', action='store_true',
                     help='skip directory list checking (default false)')
 parser.add_argument('--debug', action='store_true',
                     help='run in debug mode (default false)')
@@ -199,6 +199,8 @@ def check_item_os(filename, items, expected):
                 f.write(text)
         except (UnicodeError, UnicodeDecodeError, IOError) as e:
             pass
+    if args.l and args.s and ('dirlist.txt' in filename):
+        return
     try:
         with open(filename, "r") as f:
             s = f.read().replace('\\', '\\\\')
