@@ -33,8 +33,8 @@ system requirements:
 
 __description__ = 'Simple Python script for security auditing purposes.'
 __author__ = 'Gabor Seljan'
-__version__ = '0.1.7'
-__date__ = '2016/11/26'
+__version__ = '0.2.2'
+__date__ = '2016/12/15'
 
 import io
 import os
@@ -50,15 +50,16 @@ import dominate
 from argparse import *
 from dominate.tags import *
 from configobj import ConfigObj
+from subprocess import check_call
 from subprocess import check_output
 
 banner = """
-                     ____                  _     _____ _______
-                    |  _ \     v{}     | |   |_   _|__   __|
-                    | |_) | ___ _ __   ___| |__   | |    | |
-                    |  _ < / _ \ '_ \ / __| '_ \  | |    | |
-                    | |_) |  __/ | | | (__| | | |_| |_   | |
-                    |____/ \___|_| |_|\___|_| |_|_____|  |_|
+                 ____                  _     _____ _______
+                |  _ \     v{}     | |   |_   _|__   __|
+                | |_) | ___ _ __   ___| |__   | |    | |
+                |  _ < / _ \ '_ \ / __| '_ \  | |    | |
+                | |_) |  __/ | | | (__| | | |_| |_   | |
+                |____/ \___|_| |_|\___|_| |_|_____|  |_|
 """.format(__version__)
 
 print(banner)
@@ -70,23 +71,25 @@ parser = ArgumentParser(
 )
 
 module = parser.add_mutually_exclusive_group(required=True)
-module.add_argument('-d, --database', dest='d', action='store_true',
+module.add_argument('-d, --database', dest='database', action='store_true',
                     help='audit Oracle database')
-module.add_argument('-l, --linux', dest='l', action='store_true',
+module.add_argument('-l, --linux', dest='linux', action='store_true',
                     help='audit Linux system')
-module.add_argument('-w, --windows', dest='w', action='store_true',
+module.add_argument('-w, --windows', dest='windows', action='store_true',
                     help='audit Windows system')
 
-parser.add_argument('-o, --output', dest='o', default='results',
+parser.add_argument('-o, --output', dest='output', default='results',
                     help='output filename (default results_{timestamp}.html)')
-parser.add_argument('-p, --path', dest='p', default='.',
+parser.add_argument('-p, --path', dest='path', default='.',
                     help='base path to target directory (default .)')
-parser.add_argument('-v, --verbose', dest='v', action='store_true',
+parser.add_argument('-v, --verbose', dest='verbose', action='store_true',
                     help='run in verbose mode')
-parser.add_argument('-s, --skip-dirlist', dest='s', action='store_true',
+parser.add_argument('-s, --skip-dirlist', dest='skipdirlist', action='store_true',
                     help='skip directory list checking (default false)')
-parser.add_argument('--debug', action='store_true',
+parser.add_argument('--debug', dest='debug', action='store_true',
                     help='run in debug mode (default false)')
+parser.add_argument('--no-color', dest='nocolor', action='store_true',
+                    help='disable colored output (default false)')
 
 args = parser.parse_args()
 
@@ -108,27 +111,42 @@ headers = [
     'Result'
 ]
 
+if args.nocolor:
+    WHITE = ''
+    GREY = ''
+    RED = ''
+    GREEN = ''
+    BLUE = ''
+else:
+    WHITE = '\033[0m'
+    GREY = '\033[90m'
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    BLUE = '\033[94m'
+
 
 def main():
     global audit, results, total, passed, failed, errors
 
+    start_time = time.time()
+
     config = ConfigObj('benchit.ini')
 
-    if args.d:
-        print('[+] Oracle detected!')
+    if args.database:
+        print_info('Oracle detected!')
         audit = config['Database']['Oracle']
-    elif args.w:
-        print('[+] Windows detected!')
+    elif args.windows:
+        print_info('Windows detected!')
         audit = config['Windows']['2012']
-    elif args.l:
-        for l in ['RedHat', 'SuSe', 'LSB', 'Debian']:
-            if os.path.isfile('%s/etc/%s-release' % (args.p, l)):
-                print('[+] %s Linux detected!' % l)
-                audit = config['Linux'][l]
+    elif args.linux:
+        for distro in ['CentOS', 'RedHat', 'SuSe', 'LSB', 'Debian']:
+            if os.path.isfile('{}/etc/{}-release'.format(args.path, distro)):
+                print_info('{} Linux detected!', distro)
+                audit = config['Linux'][distro]
                 break
 
     if audit is None:
-        print('[!] Nothing to audit...')
+        print_warning('Nothing to audit...')
         exit(1)
 
     with open(audit['csv'], mode='r') as infile:
@@ -144,196 +162,280 @@ def main():
             else:
                 items[i] = {row[1]: [tuple(row[2:])]}
 
-    print('[*] Audit in progress, this can take a while...')
+    print_info('Audit in progress, this can take a while...')
 
-    for r, d in items.items():
-        print('[*]   Checking %s items...' % r)
-        if r != 'None':
-            for f, i in d.items():
-                print('[+]     Processing %s' % f)
-                path = '/'.join([args.p, f])
-                if args.d:
-                    check_item_database(path, i, ast.literal_eval(r))
-                elif args.l or args.w:
-                    check_item_os(path, i, ast.literal_eval(r))
-        else:
-            for f, i in d.items():
-                try:
-                    for c, n, t, d, *_ in i:
+    for category, records in items.items():
+        print_info('  Checking items in category {}...', category)
+        category = ast.literal_eval(category)
+        for filepath, checks in records.items():
+            fullpath = '/'.join([args.path, filepath])
+            check_item_preprocess(fullpath)
+            if category is not None:
+                print_status('    Processing {}', filepath)
+                if args.verbose:
+                    print()
+                if args.database:
+                    check_item_database(fullpath, checks, category)
+                elif args.linux or args.windows:
+                    check_item_os(fullpath, checks, category)
+            else:
+                for command, number, title, description, *_ in checks:
+                    try:
                         total += 1
-                        if not os.path.isfile('/'.join([args.p, f])):
-                            raise IOError('{} not found!'.format(f))
-                        c = c.format(args.p)
-                        print('[+]     Executing {}'.format(c))
-                        output = check_output(c, shell=True)
+                        print_status('    Processing {}', filepath)
+                        if not os.path.isfile('/'.join([args.path, filepath])):
+                            raise IOError()
+                        command = command.format(args.path)
+                        if args.verbose:
+                            print()
+                            print_verbose('    Executing {}', command)
+                        output = check_output(command, shell=True)
+                        if not args.verbose:
+                            print_good('OK!')
                         if output:
                             failed += 1
-                            r = 'Fail'
+                            result = 'Fail'
                         else:
                             passed += 1
-                            r = 'Pass'
-                        results.append((n, t, d, '', '', '', r))
-                except (IOError, OSError) as err:
-                    print('[!] Error: {}'.format(err))
-                    for c, n, t, d, *_ in i:
+                            result = 'Pass'
+                    except (IOError, OSError) as e:
+                        print_error('Not found!')
                         errors += 1
-                        results.append((n, t, d, '', '', '', 'Error'))
+                        result = 'Error'
+                    results.append((
+                        number,
+                        title,
+                        description,
+                        '',  # default
+                        '',  # actual
+                        '',  # expected
+                        result))
+
+    print_info('Audit finished in {:f} seconds!', time.time() - start_time)
 
     timestamp = time.strftime("%Y%m%dT%H%M%S")
-    filename = '{}_{}'.format(args.o, timestamp)
+    filename = '{}_{}'.format(args.output, timestamp)
     create_html_report('{}.html'.format(filename))
     create_csv_report('{}.csv'.format(filename))
 
-    print('[*] Audit finished!')
 
-
-def check_item_os(filename, items, expected):
-    """Checks every regex pattern listed in the loaded CSV file."""
-    global results, total, passed, failed, errors
+def check_item_preprocess(filepath):
     # Convert UTF-16 encoded files (created by reg export) to UTF-8
-    if args.w:
+    if args.windows and '.reg' in filepath:
         try:
-            with io.open(filename, 'r', encoding='utf-16') as f:
+            with io.open(filepath, 'r', encoding='utf-16') as f:
                 text = f.read()
-            with io.open(filename, 'w', encoding='utf-8') as f:
+            with io.open(filepath, 'w', encoding='utf-8') as f:
                 f.write(text)
         except (UnicodeError, UnicodeDecodeError, IOError) as e:
             pass
-    if args.l and args.s and ('dirlist.txt' in filename):
+    # Processing large directory content lists ("ls -Ral /") can be very slow.
+    # Copy out the necessary directory lists into smaller files.
+    if args.linux and 'dirlist-' in filepath and not os.path.isfile(filepath):
+        command = 'grep -P "^/{0}:[\s\S]*" -A500 {1} | sed -e "/^$/,$d" > {2}'
+        command = command.format(
+            filepath[filepath.index('-')+1:-4].replace('-', '/'),
+            filepath[:filepath.index('-'):] + '.txt',
+            filepath
+        )
+        check_call(command, shell=True)
+
+
+def check_item_os(filename, items, category):
+    """Checks every regex pattern listed in the loaded CSV file."""
+    global results, total, passed, failed, errors
+    if args.linux and args.skipdirlist and ('dirlist.txt' in filename):
         return
     try:
         with open(filename, 'r', encoding='utf8') as f:
-            s = f.read().replace('\\', '\\\\')
-            for p, n, t, b, d, e in items:
+            string = f.read().replace('\\', '\\\\')
+            for pattern, number, title, summary, default, expected in items:
                 total += 1
-                m = re.search(p, s, re.M)
-                e = 'N/A' if len(e) == 0 else e
-                m = 'N/A' if m is None or len(m.groups()) == 0 else m.group(1)
+                match = re.search(pattern, string, re.M)
+                if len(expected) == 0:
+                    expected = 'N/A'
+                if not match or len(match.groups()) == 0:
+                    match = 'N/A'
+                else:
+                    match = match.group(1)
                 # Convert null-terminated strings from HEX to ASCII
-                if args.w and m.startswith('hex'):
-                    m = re.sub('(00,?|[\s,]|\\\\)', '', m[7:])
-                    m = binascii.unhexlify(m)
-                    m = str(m)[2:-1]
+                if args.windows and match.startswith('hex'):
+                    match = re.sub('(00,?|[\s,]|\\\\)', '', match[7:])
+                    match = binascii.unhexlify(match)
+                    match = str(match)[2:-1]
                 # We expect a match
-                if expected:
+                if category is True:
                     # We found a match
-                    if m != 'N/A':
+                    if match != 'N/A':
                         # Any value is accepted
-                        if e == 'N/A':
+                        if expected == 'N/A':
                             passed += 1
-                            r = 'Pass'
+                            result = 'Pass'
                         # Check relational (>, <, =) values
-                        elif check_item_relational(m, e):
+                        elif check_item_relational(match, expected):
                             passed += 1
-                            r = 'Pass'
+                            result = 'Pass'
                         else:
                             failed += 1
-                            r = 'Fail'
+                            result = 'Fail'
                     # We have a default value
-                    elif len(d) != 0 and check_item_default(d, e):
+                    elif len(default) != 0 and check_item_default(default, expected):
                             passed += 1
-                            r = 'Pass'
+                            result = 'Pass'
                     else:
                         failed += 1
-                        r = 'Fail'
+                        result = 'Fail'
                 # We don't expect a match
-                elif m == 'N/A' and not expected:
+                elif match == 'N/A' and category is False:
                     passed += 1
-                    r = 'Pass'
+                    result = 'Pass'
                 else:
                     failed += 1
-                    r = 'Fail'
-                results.append((n, t, b, d, m, e, r))
-                if args.debug:
-                    msg = 'N:{}\tD:{}\tM:{}\tE:{}\tR:{}'.format(n, d, m, e, r)
-                    print('        {}'.format(msg))
+                    result = 'Fail'
+                results.append((
+                    number,
+                    title,
+                    summary,
+                    default,
+                    match,
+                    expected,
+                    result
+                ))
+                if args.verbose:
+                    print_verbose(
+                        '        '
+                        'N:{:15.15s}'
+                        'D:{:20.20s}'
+                        'M:{:20.20s}'
+                        'E:{:20.20s}'
+                        'R:{:5.5s}'.format(
+                            number,
+                            default,
+                            match,
+                            expected,
+                            result
+                        ))
+            if not args.verbose:
+                print_good('OK!')
     except IOError as err:
-        print('[!] Error: %s not found!' % filename)
         if err.errno is 2:
-            for p, n, t, b, d, e in items:
+            if not args.verbose:
+                print_error('Not found!')
+            for pattern, number, title, summary, default, expected in items:
                 total += 1
-                m = 'N/F'
-                if len(d) != 0:
-                    if check_item_default(d, e):
+                match = 'N/F'
+                if len(default) != 0:
+                    if check_item_default(default, expected):
                         passed += 1
-                        r = 'Pass'
+                        result = 'Pass'
                     else:
                         failed += 1
-                        r = 'Fail'
+                        result = 'Fail'
                 else:
                     errors += 1
-                    r = 'Error'
-                results.append((n, t, b, d, m, e, r))
-                if args.debug:
-                    msg = 'N:{}\tD:{}\tM:{}\tE:{}\tR:{}'.format(n, d, m, e, r)
-                    print('        {}'.format(msg))
+                    result = 'Error'
+                results.append((
+                    number,
+                    title,
+                    summary,
+                    default,
+                    match,
+                    expected,
+                    result
+                ))
+                if args.verbose:
+                    print_verbose(
+                        '        '
+                        'N:{:15.15s}'
+                        'D:{:20.20s}'
+                        'M:{:20.20s}'
+                        'E:{:20.20s}'
+                        'R:{:5.5s}'.format(
+                            number,
+                            default,
+                            match,
+                            expected,
+                            result
+                        ))
         return
 
 
-def check_item_default(d, e):
+def check_item_default(default, expected):
     """Checks the default value when the specific setting is not available."""
-    if e[:1] in ['>', '<'] and d not in ['Not defined', 'Not configured']:
-        return check_item_relational(d, e)
-    elif d == e:
+    if expected[:1] in ['>', '<'] and not default.startswith('Not '):
+        return check_item_relational(default, expected)
+    elif default == expected:
         return True
     else:
         return False
 
 
-def check_item_relational(a, e):
+def check_item_relational(actual, expected):
     """Checks for acceptable lesser or greather values."""
-    if e[:1] == '>' and int(a) >= int(e[1:]):
+    if expected[:1] == '>' and int(actual) >= int(expected[1:]):
         return True
-    elif e[:1] == '<' and int(a) <= int(e[1:]):
+    elif expected[:1] == '<' and int(actual) <= int(expected[1:]):
         return True
-    elif a == e:
+    elif actual == expected:
         return True
     else:
         return False
 
 
-def check_item_database(filename, items, expected):
+def check_item_database(filename, items, category):
     """Checks every query listed in the loaded CSV file."""
     global results, total, passed, failed, errors
     try:
-        for q, n, t, b, d, e in items:
-            if args.v:
-                print('[+]            {}'.format(q))
+        for query, number, title, summary, default, expected in items:
+            query = query.format(filename)
+            if args.verbose:
+                print_verbose('      {}'.format(query))
             if not os.path.isfile(filename):
                 raise IOError('{} not found!'.format(filename))
             total += 1
-            params = ['q', '-H', '-d', ';', q.format(filename)]
-            o = str(check_output(params, shell=True).strip())
-            if o.startswith('b\''):
-                o = o[2:-1]
-            if o and e:
-                if args.debug:
-                    print(
-                        'o: {:s} {:s} e: {:s} {:s}'.format(
-                            o.strip(),
-                            type(o.strip()),
-                            e.strip(),
-                            type(e.strip())
-                            )
-                        )
-                if o != e:
+            params = ['q', '-H', '-d', ';', query]
+            output = str(check_output(params, shell=True).strip())
+            if output.startswith('b\''):
+                output = output[2:-1]
+            if category is True:
+                if output == expected:
+                    passed += 1
+                    result = 'Pass'
+                else:
                     failed += 1
-                    results.append((n, t, b, d, o, e, 'Fail'))
+                    result = 'Fail'
+            elif category is False:
+                if output:
+                    failed += 1
+                    result = 'Fail'
                 else:
                     passed += 1
-                    results.append((n, t, b, d, o, e, 'Pass'))
-            elif bool(o) is not expected:
-                failed += 1
-                results.append((n, t, b, d, '', '', 'Fail'))
-            else:
-                passed += 1
-                results.append((n, t, b, d, '', '', 'Pass'))
+                    result = 'Pass'
+            results.append((
+                number,
+                title,
+                summary,
+                default,
+                output,
+                expected,
+                result
+            ))
+        if not args.verbose:
+            print_good('OK!')
     except (IOError, OSError) as err:
-        print('[!] Error: {}'.format(err))
-        for q, n, t, b, d, e in items:
+        print_error('Error: {}'.format(err))
+        for query, number, title, summary, default, expected in items:
             total += 1
             errors += 1
-            results.append((n, t, b, d, '', e, 'Error'))
+            results.append((
+                number,
+                title,
+                summary,
+                default,
+                '',
+                expected,
+                'Error'
+            ))
         return
 
 
@@ -379,30 +481,56 @@ def create_html_report(filename):
             for header in headers:
                 l += th(header, bgcolor='black', style='color:white')
         with t.add(tbody(border=1, style=styles[1])):
-            for n, t, b, d, a, e, r in sorted(set(results), key=lambda x: tuple(map(int, x[0].split('.')))):
+            for number, title, summary, default, actual, expected, result in sorted(set(results), key=lambda x: tuple(map(int, x[0].split('.')))):
                 l = tr(style='border:1px solid black')
-                l += td(n, align='left', width='5%', style=styles[1])
-                l += td(t, align='left', width='32%', style=styles[1])
-                l += td(b, align='left', width='30%', style=styles[1])
-                l += td(d, align='left', width='10%', style=styles[1])
-                l += td(a, align='left', width='10%', style=styles[1])
-                l += td(e, align='left', width='10%', style=styles[1])
-                l += td(r, align='center', bgcolor=colors[r], style=styles[1])
+                l += td(number, align='left', width='5%', style=styles[1])
+                l += td(title, align='left', width='32%', style=styles[1])
+                l += td(summary, align='left', width='30%', style=styles[1])
+                l += td(default, align='left', width='10%', style=styles[1])
+                l += td(actual, align='left', width='10%', style=styles[1])
+                l += td(expected, align='left', width='10%', style=styles[1])
+                l += td(result, align='center', bgcolor=colors[result], style=styles[1])
 
+    print_status('  Creating {}', filename)
     with open(filename, 'w') as f:
         f.write(str(doc))
-        print('[+]   Created %s' % filename)
+        print_good('OK!')
 
 
 def create_csv_report(filename):
     """Creates a CSV report from the results."""
+    print_status('  Creating {}', filename)
     with open(filename, 'w', newline='') as f:
         w = csv.writer(f, delimiter=';')
         w.writerow(headers)
-        for n, t, b, d, a, e, r in sorted(set(results), key=lambda x: tuple(map(int, x[0].split('.')))):
-            w.writerow([n, t, b, d, a, e, r])
-        print('[+]   Created %s' % filename)
+        for number, title, summary, default, actual, expected, result in sorted(set(results), key=lambda x: tuple(map(int, x[0].split('.')))):
+            w.writerow([number, title, summary, default, actual, expected, result])
+        print_good('OK!')
+
+
+def print_info(info_msg, format_string=''):
+    print(BLUE + '[*] ' + info_msg.format(format_string) + WHITE)
+
+
+def print_status(status_msg, format_string=''):
+    print(WHITE + '[+] ' + status_msg.format(format_string) + WHITE, end='')
+
+
+def print_good(good_msg, format_string=''):
+    print(' ' + GREEN + good_msg.format(format_string) + WHITE)
+
+
+def print_error(error_msg, format_string=''):
+    print(' ' + RED + error_msg.format(format_string) + WHITE)
+
+
+def print_warning(warning_msg, format_string=''):
+    print(RED + '[!] ' + warning_msg.format(format_string) + WHITE)
+
+
+def print_verbose(verbose_msg, format_string=''):
+    print(GREY + '[V] ' + verbose_msg.format(format_string) + WHITE)
 
 
 if __name__ == "__main__":
-        main()
+    main()
