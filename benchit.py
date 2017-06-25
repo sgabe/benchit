@@ -90,6 +90,8 @@ parser.add_argument('--debug', dest='debug', action='store_true',
                     help='run in debug mode (default false)')
 parser.add_argument('--no-color', dest='nocolor', action='store_true',
                     help='disable colored output (default false)')
+parser.add_argument('-i, --ignore-case', dest='ignorecase', action='store_true',
+                    help='perform case-insensitive matching (default false)')
 
 args = parser.parse_args()
 
@@ -251,7 +253,8 @@ def check_item_os(filename, items, category):
             string = f.read().replace('\\', '\\\\')
             for pattern, number, title, summary, default, expected in items:
                 total += 1
-                match = re.search(pattern, string, re.M)
+                flags = (re.M | re.I) if args.ignorecase else re.M
+                match = re.search(pattern, string, flags)
                 if len(expected) == 0:
                     expected = 'N/A'
                 if not match or len(match.groups()) == 0:
