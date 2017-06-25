@@ -257,8 +257,13 @@ def check_item_os(filename, items, category):
                 match = re.search(pattern, string, flags)
                 if len(expected) == 0:
                     expected = 'N/A'
-                if not match or len(match.groups()) == 0:
+                # We did not find anything to work with
+                if not match:
+                    match = 'N/F'
+                # We found a match and we are not interested in the details
+                elif len(match.groups()) == 0:
                     match = 'N/A'
+                # We found a match and we have a subgroup to check
                 else:
                     match = match.group(1)
                 # Convert null-terminated strings from HEX to ASCII
@@ -269,7 +274,7 @@ def check_item_os(filename, items, category):
                 # We expect a match
                 if category is True:
                     # We found a match
-                    if match != 'N/A':
+                    if match != 'N/F':
                         # Any value is accepted
                         if expected == 'N/A':
                             passed += 1
@@ -289,7 +294,7 @@ def check_item_os(filename, items, category):
                         failed += 1
                         result = 'Fail'
                 # We don't expect a match
-                elif match == 'N/A' and category is False:
+                elif category is False and match == 'N/F':
                     passed += 1
                     result = 'Pass'
                 else:
