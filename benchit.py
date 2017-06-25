@@ -319,7 +319,8 @@ def check_item_os(filename, items, category):
                         'R:{:5.5s}'.format(
                             number,
                             default,
-                            match,
+                            # Prevent { throwing an error in verbose mode
+                            re.sub('{', '{{', match),
                             expected,
                             result
                         ))
