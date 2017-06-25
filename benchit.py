@@ -208,9 +208,9 @@ def main():
                         number,
                         title,
                         description,
-                        '',  # default
-                        '',  # actual
-                        '',  # expected
+                        '',     # default
+                        'N/A',  # actual
+                        'N/A',  # expected
                         result))
 
     print_info('Audit finished in {:f} seconds!', time.time() - start_time)
@@ -441,7 +441,7 @@ def check_item_database(filename, items, category):
                 title,
                 summary,
                 default,
-                '',
+                'N/A',
                 expected,
                 'Error'
             ))
