@@ -33,8 +33,8 @@ system requirements:
 
 __description__ = 'Simple Python script for security auditing purposes.'
 __author__ = 'Gabor Seljan'
-__version__ = '0.2.2'
-__date__ = '2016/12/15'
+__version__ = '0.2.3'
+__date__ = '2017/06/25'
 
 import io
 import os
